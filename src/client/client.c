@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <stdbool.h>
 
 typedef struct fileInfo {
     char fname[NAME_MAX + 1];
@@ -17,7 +18,7 @@ struct clientOptions
 {
     int file_cnt;
     char *server_ip;
-    in_port_t port_out;
+    in_port_t port;
 };
 
 static void send_file(FILE *fp, char *fname, int sockfd);
@@ -41,28 +42,25 @@ int main (int argc, char *argv[]) {
 
     clientSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (clientSocket < 0) {
-        printf("[-]Error in connection.\n");
-        return EXIT_FAILURE;
+        error_errno(__FILE__, __func__ , __LINE__, errno, 2);
     }
     printf("[+]Client socket is created.\n");
 
     memset(&serverAddr, '\0', sizeof(serverAddr));
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(opts.port_out);
+    serverAddr.sin_port = htons(opts.port);
     serverAddr.sin_addr.s_addr = inet_addr(opts.server_ip);
 
     ret = connect(clientSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr));
     if (ret < 0) {
-        printf("[-]Error in connection.\n");
-        return EXIT_FAILURE;
+        error_errno(__FILE__, __func__ , __LINE__, errno, 2);
     }
     printf("[+]Connect to Server.\n");
 
     for (int i = 0; i < opts.file_cnt; i++){
         fp = fopen(files[i], "r");
         if (fp == NULL) {
-            perror("[-]Error in reading file.");
-            return EXIT_FAILURE;
+            error_message(__FILE__, __func__ , __LINE__, "Can't read a file", 2);
         }
         char *fname = (char*) malloc(sizeof(files[i])+1);
         strcpy(fname, files[i]);
@@ -86,7 +84,7 @@ static void options_init(struct clientOptions *opts)
 {
     memset(opts, 0, sizeof(struct clientOptions));
     opts->server_ip = "127.0.0.1"; //default localhost
-    opts->port_out  = DEFAULT_PORT;
+    opts->port  = DEFAULT_PORT;
 }
 
 void send_file(FILE *file, char *fname, int clientSocket) {
@@ -122,41 +120,48 @@ void send_file(FILE *file, char *fname, int clientSocket) {
 static void parse_client_arguments(int argc, char *argv[], struct clientOptions *opts)
 {
     int c;
-
+    bool is_serverip_set = false;
     while ((c = getopt(argc, argv, "s:p:*:")) != -1) {
         switch(c) {
             case 's':
             {
                 opts->server_ip = optarg;
-                printf("Serverip : %s\n", opts->server_ip);
+                is_serverip_set = true;
                 break;
             }
             case 'p':
             {
-                opts->port_out = parse_port(optarg, 10);
-                printf("Port out : %hu\n", opts->port_out);
+                opts->port = parse_port(optarg, 10);
                 break;
             }
             case ':':
             {
-                fatal_message(__FILE__, __func__ , __LINE__, "\"Option requires an operand\"", 5);
+                error_message(__FILE__, __func__ , __LINE__, "\"Option requires an operand\"", 5);
                 break;
             }
             case '?':
             {
-                fatal_message(__FILE__, __func__ , __LINE__, "Unknown", 6);
+                error_message(__FILE__, __func__ , __LINE__, "Unknown", 6);
                 break;
             }
         }
     }
 
-    int i = 0;
+    if (!is_serverip_set)
+        error_message(__FILE__, __func__ , __LINE__, "\"Server IP must be included\"", 5);
+
+    int count = 0;
     //Read only txt file
     for (; optind < argc; optind++) {
         if (strstr(argv[optind], ".txt")) {
-            files[i++] = argv[optind];
+            files[count++] = argv[optind];
+        } else {
+            error_message(__FILE__, __func__ , __LINE__, "invalid file name", 6);
         }
     }
 
-    opts->file_cnt = i;
+    if (count == 0)
+        error_message(__FILE__, __func__ , __LINE__, "\"At least one file required\"", 5);
+
+    opts->file_cnt = count;
 }
